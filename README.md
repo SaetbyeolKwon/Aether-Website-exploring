@@ -15,8 +15,3 @@ Four real-time interactive experiments built around the Aether NY wordmark. Each
 | 03 | **Fluid Shader** | Real-time GLSL plasma with per-letter phase offsets and FBM distortion | WebGL, GLSL |
 | 04 | **Hand Tracking AI** | In-browser ML — point to scatter, open palm for vortex, fist to collapse | MediaPipe, Canvas |
 
----
-
-## Built by
-
-[Sae Kwon](https://aetherny.com) — Creative Technologist @ Aether NY
