@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aether — Option 4: Hand Tracking AI</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; width: 100vw; height: 100vh; overflow: hidden; font-family: monospace; }
+  #main-canvas { position: absolute; top: 0; left: 0; }
+  #video { position: absolute; bottom: 20px; right: 20px; width: 140px; height: 105px; opacity: 0.35; border: 1px solid rgba(120,200,255,0.3); transform: scaleX(-1); border-radius: 4px; }
+  #status { position: fixed; top: 28px; left: 50%; transform: translateX(-50%); font-size: 10px; letter-spacing: 0.25em; color: rgba(120,200,255,0.6); text-transform: uppercase; }
+  #label { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); font-size: 11px; color: rgba(255,255,255,0.3); letter-spacing: 0.2em; text-transform: uppercase; }
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 200; display: flex; align-items: center; justify-content: space-between; padding: 18px 32px; font-family: monospace; opacity: 0.25; transition: opacity 0.3s; }
+  nav:hover { opacity: 1; }
+  nav::before { content: ''; position: absolute; inset: 0; background: linear-gradient(rgba(10,10,10,0.9), transparent); pointer-events: none; }
+  .nav-brand { font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: #fff; text-decoration: none; position: relative; }
+  .nav-links { display: flex; gap: 28px; position: relative; }
+  .nav-links a { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s; }
+  .nav-links a:hover { color: rgba(120,200,255,0.9); }
+  .nav-links a.active { color: #fff; }
+  #start-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: transparent; border: 1px solid rgba(120,200,255,0.5); color: rgba(120,200,255,0.9); font-family: monospace; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; padding: 14px 32px; cursor: pointer; transition: all 0.2s; }
+  #start-btn:hover { background: rgba(120,200,255,0.1); border-color: rgba(120,200,255,0.9); }
+  #hint { position: fixed; top: calc(50% + 60px); left: 50%; transform: translateX(-50%); font-size: 10px; color: rgba(255,255,255,0.2); letter-spacing: 0.15em; text-align: center; line-height: 1.8; }
+  #gesture-label { position: fixed; top: 50px; left: 50%; transform: translateX(-50%); font-size: 10px; letter-spacing: 0.2em; color: rgba(120,200,255,0.0); text-transform: uppercase; transition: color 0.3s; }
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-brand" href="index.html">Aether</a>
+  <div class="nav-links">
+    <a href="option1_magnetic.html">01 · Magnetic</a>
+    <a href="option2_particles.html">02 · Particles</a>
+    <a href="option3_shader.html">03 · Shader</a>
+    <a href="option4_handtrack.html" class="active">04 · Hand Track</a>
+  </div>
+</nav>
+<canvas id="main-canvas"></canvas>
+<video id="video" autoplay playsinline></video>
+<div id="status">Initializing...</div>
+<div id="gesture-label" id="gesture-label"></div>
+<div id="label">Option 4 — Hand Tracking AI</div>
+<button id="start-btn">Enable Camera</button>
+<div id="hint">Point finger → scatter &nbsp;|&nbsp; Open palm → vortex &nbsp;|&nbsp; Fist → collapse per letter</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<script>
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+const video = document.getElementById('video');
+const statusEl = document.getElementById('status');
+const startBtn = document.getElementById('start-btn');
+const hintEl = document.getElementById('hint');
+const gestureLabel = document.getElementById('gesture-label');
+
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', () => { resize(); buildLetterGroups(); });
+
+const SVG_W = 653.5, SVG_H = 156.4;
+const LETTER_DEFS = [
+  { id:'A', path:'M49.5,20.8L0,155.4h22.2l7.9-21.4h74.3l-.3-1.2c-3.6-13.7-11.5-19.5-26.2-19.5h-40.1L71.3,22l49.1,133.4h22.7L93.6,20.8h-44.1Z' },
+  { id:'E', path:'M201.7,40.5h0c-32,0-58,26-58,58s26,58,58,58,39.8-11.1,50.2-28.9l1.3-2.2h-25.4l-.4.5c-6.9,7.2-16,11.1-25.6,11.1-17.7,0-32.6-13.4-35.8-31.1h93.4v-1.3c.3-2,.4-4,.4-6,0-32-26-58-58-58ZM166.5,88.4c4.2-16.3,18.4-28.4,35.2-28.4s31,12,35.2,28.4h-70.4Z' },
+  { id:'T', path:'M296.4,17.6V0h-20.7v16.1c0,13.9-6.6,23.7-16.1,23.7h-1.2v20.7h17.1v47.1c0,27.6,18.8,47.6,44.7,47.6h1v-20.7h-1c-14.1,0-24-11.1-24-26.9v-47.2h25v-20.7h-36.6c7.1-3.5,11.8-9.9,11.8-22.1h0Z' },
+  { id:'H', path:'M388,39.8c-12.1,0-22.5,4.5-30.3,13V0h-20.7v155.3h20.7v-60.7c0-30.8,21.2-34.1,30.3-34.1,16.3,0,27.3,13.3,27.3,33v61.7h20.7v-61.7c0-31.2-20.2-53.8-48-53.8Z' },
+  { id:'E2', path:'M509.6,40.5h0c-32,0-58,26-58,58s26,58,58,58,39.8-11.1,50.2-28.9l1.3-2.2h-25.4l-.4.5c-6.9,7.2-16,11.1-25.6,11.1-17.7,0-32.6-13.4-35.8-31.1h93.3v-1.3c.3-2,.4-4,.4-6,0-32-26-58-58-58ZM474.4,88.4h0c4.2-16.3,18.4-28.4,35.2-28.4s31,12,35.2,28.4h-70.4Z' },
+  { id:'R', path:'M629.1,41.7c-6.1,0-11.6,3.4-14.4,8.8l-5.5,10.8h32.8l11.5-19.5h-24.4Z', polygon:'583.2,155.3 604,155.3 604,41.6 583.2,41.6' },
+];
+
+// Approx letter center X in SVG coords
+const LETTER_CENTER_X = { A: 65, E: 202, T: 296, H: 388, E2: 510, R: 610 };
+
+let letterGroups = [];
+
+function samplePoints(def, logoW, logoH, offX, offY) {
+  const oc = document.createElement('canvas');
+  oc.width = Math.ceil(logoW); oc.height = Math.ceil(logoH);
+  const oc2 = oc.getContext('2d');
+  const scale = logoW / SVG_W;
+  oc2.save(); oc2.scale(scale, scale);
+  oc2.fillStyle = '#fff';
+  oc2.fill(new Path2D(def.path));
+  if (def.polygon) {
+    const pts = def.polygon.split(' ').map(s => s.split(',').map(Number));
+    oc2.beginPath(); oc2.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) oc2.lineTo(pts[i][0], pts[i][1]);
+    oc2.closePath(); oc2.fill();
+  }
+  oc2.restore();
+  const data = oc2.getImageData(0, 0, oc.width, oc.height).data;
+  const pts = [];
+  for (let y = 0; y < oc.height; y += 3) {
+    for (let x = 0; x < oc.width; x += 3) {
+      if (data[(y * oc.width + x) * 4 + 3] > 128) pts.push({ x: x + offX, y: y + offY });
+    }
+  }
+  return pts;
+}
+
+function buildLetterGroups() {
+  const logoW = Math.min(W * 0.7, 700);
+  const logoH = logoW * (SVG_H / SVG_W);
+  const offX = (W - logoW) / 2, offY = (H - logoH) / 2;
+  const scale = logoW / SVG_W;
+
+  letterGroups = LETTER_DEFS.map((def, gi) => {
+    const targets = samplePoints(def, logoW, logoH, offX, offY);
+    const centerX = offX + LETTER_CENTER_X[def.id] * scale;
+    const centerY = offY + logoH / 2;
+    const particles = Array.from({ length: 380 }, () => {
+      const t = targets[Math.floor(Math.random() * targets.length)];
+      return {
+        x: Math.random() * W, y: Math.random() * H,
+        tx: t.x, ty: t.y,
+        vx: 0, vy: 0,
+        size: Math.random() * 1.4 + 0.4,
+        alpha: 0.55 + Math.random() * 0.45,
+        noiseOff: Math.random() * 1000,
+      };
+    });
+    return { def, particles, targets, centerX, centerY, active: true };
+  });
+}
+
+// Hand tracking state
+let gesture = 'none';
+let fingerTip = { x: -999, y: -999 };
+let handDots = [];
+
+function detectGesture(lm) {
+  const ext = [lm[8].y < lm[6].y, lm[12].y < lm[10].y, lm[16].y < lm[14].y, lm[20].y < lm[18].y];
+  const count = ext.filter(Boolean).length;
+  if (count >= 4) return 'palm';
+  if (count === 1 && ext[0]) return 'point';
+  return 'fist';
+}
+
+function onResults(results) {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const lm = results.multiHandLandmarks[0];
+    gesture = detectGesture(lm);
+    fingerTip = { x: (1 - lm[8].x) * W, y: lm[8].y * H };
+    handDots = lm.map(l => ({ x: (1 - l.x) * W, y: l.y * H }));
+    statusEl.textContent = `Hand detected — ${gesture.toUpperCase()}`;
+    statusEl.style.color = 'rgba(120,200,255,0.9)';
+    gestureLabel.style.color = 'rgba(120,200,255,0.7)';
+    gestureLabel.textContent = gesture === 'point' ? '☞ SCATTER' : gesture === 'palm' ? '✋ VORTEX' : '✊ COLLAPSE';
+  } else {
+    gesture = 'none';
+    handDots = [];
+    statusEl.textContent = 'Scanning...';
+    statusEl.style.color = 'rgba(120,200,255,0.4)';
+    gestureLabel.style.color = 'rgba(120,200,255,0)';
+  }
+}
+
+let cameraStarted = false;
+startBtn.addEventListener('click', async () => {
+  if (cameraStarted) return;
+  cameraStarted = true;
+  startBtn.style.display = 'none';
+  hintEl.style.display = 'none';
+  statusEl.textContent = 'Loading model...';
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.5 });
+  hands.onResults(onResults);
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+  video.srcObject = stream;
+  const camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 320, height: 240
+  });
+  camera.start();
+  statusEl.textContent = 'Scanning...';
+});
+
+function noise(x) {
+  const i = Math.floor(x), f = x - i;
+  const a = Math.sin(i * 127.1) * 43758.5;
+  const b = Math.sin((i+1) * 127.1) * 43758.5;
+  return (a - Math.floor(a)) * (1-f) + (b - Math.floor(b)) * f;
+}
+
+let t = 0;
+function draw() {
+  ctx.fillStyle = 'rgba(10,10,10,0.2)';
+  ctx.fillRect(0, 0, W, H);
+  t += 0.012;
+
+  letterGroups.forEach((group, gi) => {
+    group.particles.forEach(p => {
+      let ax = 0, ay = 0;
+
+      if (gesture === 'point') {
+        // Scatter from finger tip
+        const dx = p.x - fingerTip.x;
+        const dy = p.y - fingerTip.y;
+        const d = Math.sqrt(dx*dx + dy*dy) + 1;
+        const force = Math.max(0, 1 - d/200) * 9;
+        ax += (dx/d) * force;
+        ay += (dy/d) * force;
+        // Also drift back to target
+        ax += (p.tx - p.x) * 0.015;
+        ay += (p.ty - p.y) * 0.015;
+      } else if (gesture === 'palm') {
+        // Vortex — rotate around finger tip
+        const dx = p.x - fingerTip.x;
+        const dy = p.y - fingerTip.y;
+        const d = Math.sqrt(dx*dx + dy*dy) + 1;
+        const force = Math.max(0, 1 - d/280) * 6;
+        ax += (-dy/d) * force;
+        ay += (dx/d) * force;
+        ax += (p.tx - p.x) * 0.008;
+        ay += (p.ty - p.y) * 0.008;
+      } else if (gesture === 'fist') {
+        // Each letter collapses to its own center
+        ax += (group.centerX - p.x) * 0.08;
+        ay += (group.centerY - p.y) * 0.08;
+      } else {
+        // Default: drift to target with subtle noise
+        const nx = noise(p.noiseOff + t) * 2 - 1;
+        const ny = noise(p.noiseOff + t + 50) * 2 - 1;
+        ax += (p.tx - p.x) * 0.055 + nx * 0.2;
+        ay += (p.ty - p.y) * 0.055 + ny * 0.2;
+      }
+
+      p.vx = (p.vx + ax) * 0.87;
+      p.vy = (p.vy + ay) * 0.87;
+      p.x += p.vx;
+      p.y += p.vy;
+
+      const vel = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+      const r = Math.min(255, 190 + vel*12);
+      const g = Math.min(255, 210 + vel*7);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size + vel*0.12, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${r},${g},255,${p.alpha})`;
+      ctx.fill();
+    });
+  });
+
+  // Hand landmarks
+  if (handDots.length > 0) {
+    handDots.forEach(d => {
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 2.5, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(120,200,255,0.5)';
+      ctx.fill();
+    });
+    ctx.beginPath();
+    ctx.arc(fingerTip.x, fingerTip.y, 7, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(120,200,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+buildLetterGroups();
+draw();
+</script>
+</body>
+</html>

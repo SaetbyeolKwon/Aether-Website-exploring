@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aether — Option 2: Particle Swarm</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; width: 100vw; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+  #label { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); font-family: monospace; font-size: 11px; color: rgba(255,255,255,0.3); letter-spacing: 0.2em; text-transform: uppercase; pointer-events: none; }
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 200; display: flex; align-items: center; justify-content: space-between; padding: 18px 32px; font-family: monospace; opacity: 0.25; transition: opacity 0.3s; }
+  nav:hover { opacity: 1; }
+  nav::before { content: ''; position: absolute; inset: 0; background: linear-gradient(rgba(10,10,10,0.9), transparent); pointer-events: none; }
+  .nav-brand { font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: #fff; text-decoration: none; position: relative; }
+  .nav-links { display: flex; gap: 28px; position: relative; }
+  .nav-links a { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s; }
+  .nav-links a:hover { color: rgba(120,200,255,0.9); }
+  .nav-links a.active { color: #fff; }
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-brand" href="index.html">Aether</a>
+  <div class="nav-links">
+    <a href="option1_magnetic.html">01 · Magnetic</a>
+    <a href="option2_particles.html" class="active">02 · Particles</a>
+    <a href="option3_shader.html">03 · Shader</a>
+    <a href="option4_handtrack.html">04 · Hand Track</a>
+  </div>
+</nav>
+<canvas id="c"></canvas>
+<div id="label">Option 2 — Particle Swarm</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = canvas.width = window.innerWidth;
+let H = canvas.height = window.innerHeight;
+window.addEventListener('resize', () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; init(); });
+
+const SVG_W = 653.5, SVG_H = 156.4;
+const REPEL_RADIUS = 85;
+const PARTICLES_PER_LETTER = 450;
+const LETTER_DELAY = 0.55; // seconds between each letter
+
+const LETTER_PATHS = [
+  { id: 'A', paths: ['M49.5,20.8L0,155.4h22.2l7.9-21.4h74.3l-.3-1.2c-3.6-13.7-11.5-19.5-26.2-19.5h-40.1L71.3,22l49.1,133.4h22.7L93.6,20.8h-44.1Z'], type: 'path' },
+  { id: 'E', paths: ['M201.7,40.5h0c-32,0-58,26-58,58s26,58,58,58,39.8-11.1,50.2-28.9l1.3-2.2h-25.4l-.4.5c-6.9,7.2-16,11.1-25.6,11.1-17.7,0-32.6-13.4-35.8-31.1h93.4v-1.3c.3-2,.4-4,.4-6,0-32-26-58-58-58ZM166.5,88.4c4.2-16.3,18.4-28.4,35.2-28.4s31,12,35.2,28.4h-70.4Z'], type: 'path' },
+  { id: 'T', paths: ['M296.4,17.6V0h-20.7v16.1c0,13.9-6.6,23.7-16.1,23.7h-1.2v20.7h17.1v47.1c0,27.6,18.8,47.6,44.7,47.6h1v-20.7h-1c-14.1,0-24-11.1-24-26.9v-47.2h25v-20.7h-36.6c7.1-3.5,11.8-9.9,11.8-22.1h0Z'], type: 'path' },
+  { id: 'H', paths: ['M388,39.8c-12.1,0-22.5,4.5-30.3,13V0h-20.7v155.3h20.7v-60.7c0-30.8,21.2-34.1,30.3-34.1,16.3,0,27.3,13.3,27.3,33v61.7h20.7v-61.7c0-31.2-20.2-53.8-48-53.8Z'], type: 'path' },
+  { id: 'E2', paths: ['M509.6,40.5h0c-32,0-58,26-58,58s26,58,58,58,39.8-11.1,50.2-28.9l1.3-2.2h-25.4l-.4.5c-6.9,7.2-16,11.1-25.6,11.1-17.7,0-32.6-13.4-35.8-31.1h93.3v-1.3c.3-2,.4-4,.4-6,0-32-26-58-58-58ZM474.4,88.4h0c4.2-16.3,18.4-28.4,35.2-28.4s31,12,35.2,28.4h-70.4Z'], type: 'path' },
+  { id: 'R', paths: ['M629.1,41.7c-6.1,0-11.6,3.4-14.4,8.8l-5.5,10.8h32.8l11.5-19.5h-24.4Z'], polygon: '583.2,155.3 604,155.3 604,41.6 583.2,41.6', type: 'mixed' },
+];
+
+let mouseX = -9999, mouseY = -9999;
+let letterGroups = [];
+let startTime = null;
+
+function sampleLetterPoints(letterDef, logoW, logoH, offX, offY) {
+  const oc = document.createElement('canvas');
+  oc.width = Math.ceil(logoW); oc.height = Math.ceil(logoH);
+  const oc2 = oc.getContext('2d');
+  const scale = logoW / SVG_W;
+  oc2.save(); oc2.scale(scale, scale);
+  oc2.fillStyle = '#fff';
+  letterDef.paths.forEach(p => oc2.fill(new Path2D(p)));
+  if (letterDef.polygon) {
+    const pts = letterDef.polygon.split(' ').map(s => s.split(',').map(Number));
+    oc2.beginPath();
+    oc2.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) oc2.lineTo(pts[i][0], pts[i][1]);
+    oc2.closePath();
+    oc2.fill();
+  }
+  oc2.restore();
+
+  const data = oc2.getImageData(0, 0, oc.width, oc.height).data;
+  const pts = [];
+  for (let y = 0; y < oc.height; y += 3) {
+    for (let x = 0; x < oc.width; x += 3) {
+      if (data[(y * oc.width + x) * 4 + 3] > 128) {
+        pts.push({ x: x + offX, y: y + offY });
+      }
+    }
+  }
+  return pts;
+}
+
+function noise(x) {
+  const i = Math.floor(x);
+  const f = x - i;
+  const a = Math.sin(i * 127.1) * 43758.5453;
+  const b = Math.sin((i+1) * 127.1) * 43758.5453;
+  return (a - Math.floor(a)) * (1-f) + (b - Math.floor(b)) * f;
+}
+
+function init() {
+  const logoW = Math.min(W * 0.7, 700);
+  const logoH = logoW * (SVG_H / SVG_W);
+  const offX = (W - logoW) / 2;
+  const offY = (H - logoH) / 2;
+
+  letterGroups = LETTER_PATHS.map((def, idx) => {
+    const targets = sampleLetterPoints(def, logoW, logoH, offX, offY);
+    const particles = Array.from({ length: PARTICLES_PER_LETTER }, () => {
+      const t = targets[Math.floor(Math.random() * targets.length)];
+      return {
+        x: Math.random() * W,
+        y: Math.random() * H,
+        tx: t.x, ty: t.y,
+        vx: (Math.random()-0.5)*3,
+        vy: (Math.random()-0.5)*3,
+        size: Math.random() * 1.4 + 0.4,
+        alpha: 0.55 + Math.random() * 0.45,
+        noiseOff: Math.random() * 1000,
+        active: false,
+        activeProg: 0,
+      };
+    });
+    return { def, particles, targets, activateAt: idx * LETTER_DELAY, active: false };
+  });
+  startTime = null;
+}
+
+let t = 0;
+function draw(timestamp) {
+  if (!startTime) startTime = timestamp;
+  const elapsed = (timestamp - startTime) / 1000;
+  t += 0.007;
+
+  ctx.fillStyle = 'rgba(10,10,10,0.18)';
+  ctx.fillRect(0, 0, W, H);
+
+  letterGroups.forEach((group, gi) => {
+    if (elapsed >= group.activateAt) group.active = true;
+
+    group.particles.forEach(p => {
+      if (!group.active) {
+        // Drift randomly before activation
+        p.x += (Math.random()-0.5)*0.5;
+        p.y += (Math.random()-0.5)*0.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 0.6, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(120,200,255,0.04)`;
+        ctx.fill();
+        return;
+      }
+
+      // Activated — converge to target
+      const dx = mouseX - p.x;
+      const dy = mouseY - p.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < REPEL_RADIUS) {
+        const force = (1 - d/REPEL_RADIUS) * 5;
+        p.vx -= (dx/d) * force;
+        p.vy -= (dy/d) * force;
+      }
+
+      const nx = noise(p.noiseOff + t) * 2 - 1;
+      const ny = noise(p.noiseOff + t + 100) * 2 - 1;
+      const speed = 0.055 + (elapsed - group.activateAt) * 0.005;
+      p.vx += (p.tx - p.x) * Math.min(speed, 0.12) + nx * 0.25;
+      p.vy += (p.ty - p.y) * Math.min(speed, 0.12) + ny * 0.25;
+      p.vx *= 0.87;
+      p.vy *= 0.87;
+      p.x += p.vx;
+      p.y += p.vy;
+
+      const vel = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+      const r = Math.min(255, 200 + vel*12);
+      const g = Math.min(255, 215 + vel*6);
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size + vel*0.1, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${r},${g},255,${p.alpha})`;
+      ctx.fill();
+    });
+  });
+
+  requestAnimationFrame(draw);
+}
+
+document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+document.addEventListener('mouseleave', () => { mouseX = -9999; mouseY = -9999; });
+// Click to restart
+document.addEventListener('click', init);
+
+init();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

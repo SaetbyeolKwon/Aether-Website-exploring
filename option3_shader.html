@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aether — Option 3: Fluid Shader</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; width: 100vw; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+  #label { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); font-family: monospace; font-size: 11px; color: rgba(255,255,255,0.3); letter-spacing: 0.2em; text-transform: uppercase; pointer-events: none; }
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 200; display: flex; align-items: center; justify-content: space-between; padding: 18px 32px; font-family: monospace; opacity: 0.25; transition: opacity 0.3s; }
+  nav:hover { opacity: 1; }
+  nav::before { content: ''; position: absolute; inset: 0; background: linear-gradient(rgba(10,10,10,0.9), transparent); pointer-events: none; }
+  .nav-brand { font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: #fff; text-decoration: none; position: relative; }
+  .nav-links { display: flex; gap: 28px; position: relative; }
+  .nav-links a { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s; }
+  .nav-links a:hover { color: rgba(120,200,255,0.9); }
+  .nav-links a.active { color: #fff; }
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-brand" href="index.html">Aether</a>
+  <div class="nav-links">
+    <a href="option1_magnetic.html">01 · Magnetic</a>
+    <a href="option2_particles.html">02 · Particles</a>
+    <a href="option3_shader.html" class="active">03 · Shader</a>
+    <a href="option4_handtrack.html">04 · Hand Track</a>
+  </div>
+</nav>
+<canvas id="c"></canvas>
+<div id="label">Option 3 — Fluid Shader</div>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+let W, H;
+let mouseX = 0.5, mouseY = 0.5;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  gl.viewport(0, 0, W, H);
+}
+window.addEventListener('resize', () => { resize(); buildLogoTex(); });
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX / window.innerWidth;
+  mouseY = 1.0 - e.clientY / window.innerHeight;
+});
+
+const VS = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const FS = `
+precision highp float;
+varying vec2 v_uv;
+uniform float u_time;
+uniform vec2 u_mouse;
+uniform vec2 u_res;
+uniform sampler2D u_logo;
+
+float hash(vec2 p) {
+  p = fract(p * vec2(127.1, 311.7));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float noise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  float a=hash(i), b=hash(i+vec2(1,0)), c=hash(i+vec2(0,1)), d=hash(i+vec2(1,1));
+  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+}
+float fbm(vec2 p) {
+  float v=0.0; float a=0.5;
+  for(int i=0;i<6;i++){ v+=a*noise(p); p=p*2.1+vec2(1.7,9.2); a*=0.5; }
+  return v;
+}
+
+void main() {
+  vec2 uv = v_uv;
+  float aspect = u_res.x / u_res.y;
+
+  // Per-letter phase offset based on x position (6 letters across)
+  float letterIndex = floor(uv.x * 6.0);
+  float letterPhase = letterIndex * 0.4;
+
+  float t = u_time * 0.18 + letterPhase;
+
+  // Mouse influence
+  vec2 mDiff = uv - u_mouse;
+  mDiff.x *= aspect;
+  float mDist = length(mDiff);
+  float mInfluence = smoothstep(0.5, 0.0, mDist);
+
+  // Flowing noise distortion
+  vec2 noiseUV = uv * 3.5;
+  float n1 = fbm(noiseUV + vec2(t, t*0.7));
+  float n2 = fbm(noiseUV + vec2(-t*0.6, t*1.1) + 5.2);
+  float distAmt = 0.016 + mInfluence * 0.028;
+  vec2 distorted = uv + vec2(n1-0.5, n2-0.5) * distAmt;
+
+  // Flip Y for WebGL texture coords
+  float logo = texture2D(u_logo, vec2(distorted.x, 1.0 - distorted.y)).r;
+  float logoSharp = texture2D(u_logo, vec2(uv.x, 1.0 - uv.y)).r;
+
+  // Plasma colors — vary hue per letter
+  float plasma = fbm(uv*2.0 + vec2(t*0.5, -t*0.3));
+  float plasma2 = fbm(uv*4.0 + vec2(-t*0.4, t*0.6) + 3.3);
+
+  // Letter-based color variation
+  float hueShift = letterIndex / 6.0;
+  vec3 col1 = mix(vec3(0.0, 0.7, 1.0), vec3(0.5, 0.0, 1.0), hueShift);
+  vec3 col2 = mix(vec3(0.4, 0.0, 1.0), vec3(0.0, 0.9, 0.8), hueShift);
+  vec3 col3 = vec3(1.0);
+
+  vec3 plasmaColor = mix(col1, col2, plasma);
+  plasmaColor = mix(plasmaColor, col3, plasma2 * 0.35);
+
+  // Edge glow
+  float eps = 0.003;
+  vec2 uvF = vec2(uv.x, 1.0-uv.y);
+  float glow = 0.0;
+  glow += texture2D(u_logo, uvF + vec2(eps,0)).r;
+  glow += texture2D(u_logo, uvF - vec2(eps,0)).r;
+  glow += texture2D(u_logo, uvF + vec2(0,eps)).r;
+  glow += texture2D(u_logo, uvF - vec2(0,eps)).r;
+  glow = max(0.0, glow*0.25 - logoSharp) * 3.5;
+
+  vec3 bg = vec3(0.04);
+  vec3 logoColor = mix(col3, plasmaColor, 0.55 + mInfluence*0.3);
+  vec3 glowColor = plasmaColor * glow * (0.9 + mInfluence);
+
+  vec3 final = bg;
+  final = mix(final, logoColor, logo);
+  final += glowColor;
+
+  gl_FragColor = vec4(final, 1.0);
+}`;
+
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s); return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uMouse = gl.getUniformLocation(prog, 'u_mouse');
+const uRes = gl.getUniformLocation(prog, 'u_res');
+const uLogo = gl.getUniformLocation(prog, 'u_logo');
+
+const SVG_W = 653.5, SVG_H = 156.4;
+const LETTER_PATHS = [
+  { path: 'M49.5,20.8L0,155.4h22.2l7.9-21.4h74.3l-.3-1.2c-3.6-13.7-11.5-19.5-26.2-19.5h-40.1L71.3,22l49.1,133.4h22.7L93.6,20.8h-44.1Z' },
+  { path: 'M201.7,40.5h0c-32,0-58,26-58,58s26,58,58,58,39.8-11.1,50.2-28.9l1.3-2.2h-25.4l-.4.5c-6.9,7.2-16,11.1-25.6,11.1-17.7,0-32.6-13.4-35.8-31.1h93.4v-1.3c.3-2,.4-4,.4-6,0-32-26-58-58-58ZM166.5,88.4c4.2-16.3,18.4-28.4,35.2-28.4s31,12,35.2,28.4h-70.4Z' },
+  { path: 'M296.4,17.6V0h-20.7v16.1c0,13.9-6.6,23.7-16.1,23.7h-1.2v20.7h17.1v47.1c0,27.6,18.8,47.6,44.7,47.6h1v-20.7h-1c-14.1,0-24-11.1-24-26.9v-47.2h25v-20.7h-36.6c7.1-3.5,11.8-9.9,11.8-22.1h0Z' },
+  { path: 'M388,39.8c-12.1,0-22.5,4.5-30.3,13V0h-20.7v155.3h20.7v-60.7c0-30.8,21.2-34.1,30.3-34.1,16.3,0,27.3,13.3,27.3,33v61.7h20.7v-61.7c0-31.2-20.2-53.8-48-53.8Z' },
+  { path: 'M509.6,40.5h0c-32,0-58,26-58,58s26,58,58,58,39.8-11.1,50.2-28.9l1.3-2.2h-25.4l-.4.5c-6.9,7.2-16,11.1-25.6,11.1-17.7,0-32.6-13.4-35.8-31.1h93.3v-1.3c.3-2,.4-4,.4-6,0-32-26-58-58-58ZM474.4,88.4h0c4.2-16.3,18.4-28.4,35.2-28.4s31,12,35.2,28.4h-70.4Z' },
+  { path: 'M629.1,41.7c-6.1,0-11.6,3.4-14.4,8.8l-5.5,10.8h32.8l11.5-19.5h-24.4Z', polygon: '583.2,155.3 604,155.3 604,41.6 583.2,41.6' },
+];
+
+const logoTex = gl.createTexture();
+
+function buildLogoTex() {
+  const tw = 1024, th = 256;
+  const oc = document.createElement('canvas');
+  oc.width = tw; oc.height = th;
+  const oc2 = oc.getContext('2d');
+  oc2.clearRect(0, 0, tw, th);
+  const scale = Math.min(tw / SVG_W, th / SVG_H) * 0.88;
+  const offX = (tw - SVG_W * scale) / 2;
+  const offY = (th - SVG_H * scale) / 2;
+  oc2.save(); oc2.translate(offX, offY); oc2.scale(scale, scale);
+  oc2.fillStyle = '#fff';
+  LETTER_PATHS.forEach(def => {
+    oc2.fill(new Path2D(def.path));
+    if (def.polygon) {
+      const pts = def.polygon.split(' ').map(s => s.split(',').map(Number));
+      oc2.beginPath();
+      oc2.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) oc2.lineTo(pts[i][0], pts[i][1]);
+      oc2.closePath(); oc2.fill();
+    }
+  });
+  oc2.restore();
+
+  gl.bindTexture(gl.TEXTURE_2D, logoTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, oc);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+resize();
+buildLogoTex();
+gl.uniform1i(uLogo, 0);
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, logoTex);
+
+const startTime = Date.now();
+function render() {
+  const t = (Date.now() - startTime) / 1000;
+  gl.uniform1f(uTime, t);
+  gl.uniform2f(uMouse, mouseX, mouseY);
+  gl.uniform2f(uRes, W, H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>
