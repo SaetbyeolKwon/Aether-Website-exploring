@@ -2,7 +2,7 @@
 
 Four real-time interactive experiments built around the Aether NY wordmark. Each demo explores a different creative coding approach — from physics simulation to in-browser machine learning.
 
-**[→ View Live Demo](https://saetbyeolkwon.github.io/Aether-Website-exploring/)**
+**[→ View Live Demo](https://saemyname.github.io/Aether-Website-exploring/)**
 
 ---
 
