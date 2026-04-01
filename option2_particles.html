@@ -39,8 +39,8 @@ let H = canvas.height = window.innerHeight;
 window.addEventListener('resize', () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; init(); });
 
 const SVG_W = 653.5, SVG_H = 156.4;
-const REPEL_RADIUS = 120;
-const REPEL_STRENGTH = 14;
+const REPEL_RADIUS = 60;
+const REPEL_STRENGTH = 3;
 const INTRO_LERP = 0.07;       // 시작 애니메이션: lerp (바운스 없음)
 const RETURN_SPRING = 0.014;   // 커서 후 복귀: spring
 const RETURN_DAMP = 0.82;
