@@ -85,8 +85,17 @@ void main() {
   vec2 uv = v_uv;
   float aspect = u_res.x / u_res.y;
 
+  // Logo rect in screen UV space — 65vw centered
+  float logoW = 0.65;
+  float logoH = logoW * (156.4 / 653.5) * aspect;
+  vec2 logoMin = vec2((1.0 - logoW) * 0.5, (1.0 - logoH) * 0.5);
+
+  // Map screen UV to logo-local UV [0,1]
+  vec2 logoUV = (uv - logoMin) / vec2(logoW, logoH);
+  float inBounds = step(0.0, logoUV.x) * step(logoUV.x, 1.0) * step(0.0, logoUV.y) * step(logoUV.y, 1.0);
+
   // Per-letter phase offset based on x position (6 letters across)
-  float letterIndex = floor(uv.x * 6.0);
+  float letterIndex = floor(clamp(logoUV.x, 0.0, 0.999) * 6.0);
   float letterPhase = letterIndex * 0.4;
 
   float t = u_time * 0.18 + letterPhase;
@@ -97,43 +106,40 @@ void main() {
   float mDist = length(mDiff);
   float mInfluence = smoothstep(0.5, 0.0, mDist);
 
-  // Flowing noise distortion
-  vec2 noiseUV = uv * 3.5;
+  // Flowing noise distortion (in logo UV space)
+  vec2 noiseUV = logoUV * 3.5;
   float n1 = fbm(noiseUV + vec2(t, t*0.7));
   float n2 = fbm(noiseUV + vec2(-t*0.6, t*1.1) + 5.2);
   float distAmt = 0.016 + mInfluence * 0.028;
-  vec2 distorted = uv + vec2(n1-0.5, n2-0.5) * distAmt;
+  vec2 distortedLogo = logoUV + vec2(n1-0.5, n2-0.5) * distAmt;
 
-  // Flip Y for WebGL texture coords
-  float logo = texture2D(u_logo, vec2(distorted.x, 1.0 - distorted.y)).r;
-  float logoSharp = texture2D(u_logo, vec2(uv.x, 1.0 - uv.y)).r;
+  // Sample logo texture (flip Y for WebGL)
+  float logo = texture2D(u_logo, vec2(distortedLogo.x, 1.0 - distortedLogo.y)).r * inBounds;
+  float logoSharp = texture2D(u_logo, vec2(logoUV.x, 1.0 - logoUV.y)).r * inBounds;
 
   // Plasma colors — vary hue per letter
-  float plasma = fbm(uv*2.0 + vec2(t*0.5, -t*0.3));
-  float plasma2 = fbm(uv*4.0 + vec2(-t*0.4, t*0.6) + 3.3);
+  float plasma = fbm(logoUV*2.0 + vec2(t*0.5, -t*0.3));
+  float plasma2 = fbm(logoUV*4.0 + vec2(-t*0.4, t*0.6) + 3.3);
 
-  // Letter-based color variation
-  float hueShift = letterIndex / 6.0;
-  vec3 col1 = mix(vec3(0.0, 0.7, 1.0), vec3(0.5, 0.0, 1.0), hueShift);
-  vec3 col2 = mix(vec3(0.4, 0.0, 1.0), vec3(0.0, 0.9, 0.8), hueShift);
+  // Monochrome white — subtle luminance shimmer only
+  float shimmer = plasma * 0.12 + plasma2 * 0.08;
   vec3 col3 = vec3(1.0);
-
-  vec3 plasmaColor = mix(col1, col2, plasma);
-  plasmaColor = mix(plasmaColor, col3, plasma2 * 0.35);
+  vec3 plasmaColor = vec3(0.88 + shimmer, 0.88 + shimmer, 0.92 + shimmer);
+  plasmaColor = mix(plasmaColor, col3, 0.6 + mInfluence * 0.3);
 
   // Edge glow
   float eps = 0.003;
-  vec2 uvF = vec2(uv.x, 1.0-uv.y);
+  vec2 uvF = vec2(logoUV.x, 1.0 - logoUV.y);
   float glow = 0.0;
   glow += texture2D(u_logo, uvF + vec2(eps,0)).r;
   glow += texture2D(u_logo, uvF - vec2(eps,0)).r;
   glow += texture2D(u_logo, uvF + vec2(0,eps)).r;
   glow += texture2D(u_logo, uvF - vec2(0,eps)).r;
-  glow = max(0.0, glow*0.25 - logoSharp) * 3.5;
+  glow = max(0.0, glow*0.25 - logoSharp) * 3.0 * inBounds;
 
   vec3 bg = vec3(0.04);
-  vec3 logoColor = mix(col3, plasmaColor, 0.55 + mInfluence*0.3);
-  vec3 glowColor = plasmaColor * glow * (0.9 + mInfluence);
+  vec3 logoColor = plasmaColor;
+  vec3 glowColor = vec3(0.7 + shimmer) * glow * (0.8 + mInfluence * 0.4);
 
   vec3 final = bg;
   final = mix(final, logoColor, logo);
